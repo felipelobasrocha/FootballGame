@@ -1,0 +1,551 @@
+<html>
+    <div>
+        <div class="side">
+            <span id="scorePlayer1" class="scorePlayer">0</span>
+            <canvas id="player1Canvas" class="playerCanvas"></canvas>
+            <img id="playerOneFlag" width="200" height="100">
+        </div>
+        <div class="side">
+            <canvas id="gameCanvas" width="800" height="600">
+            </canvas>
+        </div>
+        <div class="side">
+            <span id="scorePlayer2" class="scorePlayer">0</span>
+            <canvas id="player2Canvas" class="playerCanvas"></canvas>
+            <img id="playerTwoFlag" width="200" height="100">
+        </div>
+    </div>
+</html>
+<style>
+    .side {
+        display:inline-block;
+    }
+    .scorePlayer{
+        position: absolute;
+        margin: -100 90;
+        font-size: 50;
+    }
+    .playerCanvas{
+        position: absolute;
+        margin: -150 45;
+    }    
+    #gameCanvas{
+        border-color: green;
+        border-style: solid;
+    }
+</style>
+<script>
+    var canvas;
+    var canvasContext;
+
+    var scoreCanvas1;
+    var scoreCanvas1Context;
+    var scoreCanvas2;
+    var scoreCanvas2Context;
+
+    var offset = 0;
+    
+    const framesPerSecond = 30;
+
+    var ballX = Math.random() * (600 - 200) + 200;
+    var ballY = Math.random() * (500 - 100) + 100;
+    var ballSpeedX = Math.random() * (15 - 10) + 10;
+    var ballSpeedY = Math.random() * (10 - 4) + 4;
+
+    var player1Score = 0;
+    var player2Score = 0;
+    const WINNING_SCORE = 3;
+
+    var showingWinScreen = false;
+
+    var paddle1Y = 250;
+    var paddle2Y = 250;
+    const PADDLE_THICKNESS = 10;
+    const PADDLE_HEIGHT = 40;
+    const PADDLE_MARGIN = 20;
+
+    const PADDLE_CPU_RANGE = 100;
+    const PADDLE_CPU_AGILITY = 25;
+    const PADDLE_CPU_RESPONSE_TIME = 30; // Higher will be slowest
+
+    const LINEFIELD_THICKNESS = 7;
+    const GOAL_SIZE = 70;
+    const BALL_RADIUS_SIZE = 10;
+    const BALL_HIT_ANGLE = 0.35;
+    const INITIALCIRCLE_RADIUS_SIZE = 8;
+    const CENTERCIRCLE_RADIUS_SIZE = 50;
+    const GOALBOX_SIZE_SIDE = 50;
+    const GOALFIELD_LINE_THICKNESS = 2
+    const GOALFIELD_LINE_SIZE = 20;
+    const GOALFIELD_LINE_DISTANCEBETWEEN = 30;    
+
+    const PLAYER1_COLOR = 'yellow';
+    const PLAYER2_COLOR = 'black';
+    const BALL_COLOR = 'white';
+    const BALL_SECOND_COLOR = 'black';
+    const LINEFIELD_COLOR = 'white';
+    const FIELD_COLOR = 'green';
+
+    const BRAZIL_FLAG_URL = "http://ansci.agsci.colostate.edu/files/2016/01/brazilflag.jpg";
+    const NEWZEALAND_FLAG_URL = "http://electionresults.govt.nz/2016_flag_referendum2/current-new-zealand-flag-small.jpg";
+
+    var goalSound = new Audio();
+    const GOAL_SOUND_URL = "https://www.sounddogs.com/media/fastpreview/Sounddogs-Preview-11376991.mp3";
+    const GOAL_SOUND_TIME = 3000; // 1s * 1000
+    const VICTORY_SOUND_TIME = 150000; // 1s * 1000
+
+    
+    window.onload = function(){
+        canvas = document.getElementById('gameCanvas');
+        canvasContext = canvas.getContext('2d');
+
+        // Animation - Not really necessary
+        loadNationalFlags();
+        loadCrowdGoalScream();
+        loadScoreBoard();
+
+        setInterval(
+            function(){
+                drawFootballGame();
+                moveFootballGame();                
+            }
+            , 1000/framesPerSecond
+        );
+
+        canvas.addEventListener('mousedown',handleMouseClick);
+        canvas.addEventListener('mousemove',handleMouseMove);
+    }     
+
+    function handleMouseClick(evt){
+        if (showingWinScreen){
+            player1Score = 0;
+            player2Score = 0;
+            showingWinScreen = false;
+        }
+    }
+
+    function handleMouseMove(evt){
+        var mousePos = calculateMousePos(evt);
+        paddle1Y = mousePos.y-(PADDLE_HEIGHT/2);
+        // paddle2Y = mousePos.y-(PADDLE_HEIGHT/2);
+    }
+
+    function calculateMousePos(evt){
+        var rect = canvas.getBoundingClientRect();
+        var root = document.documentElement;
+        var mouseX = evt.clientX - rect.left - root.scrollLeft;
+        var mouseY = evt.clientY - rect.top - root.scrollTop;
+        return{
+            x:mouseX,
+            y:mouseY
+        };
+    }      
+
+    function moveFootballGame(){        
+        // Game Over
+        if (showingWinScreen){
+            return;
+        }
+
+        // CPU Artificial Intelligence
+        cpuMovement();
+
+        // Moving the ball - Both Axis (X,Y)
+        ballX = ballX + ballSpeedX;
+        ballY = ballY + ballSpeedY;
+
+        // Field - Left Goal Line Interaction
+        if (ballX < PADDLE_MARGIN+LINEFIELD_THICKNESS){
+            if (ballY > paddle1Y && 
+            ballY < paddle1Y+PADDLE_HEIGHT){
+                ballTouchesPaddle(paddle1Y);
+            } else if (ballX < LINEFIELD_THICKNESS){
+                player2Score = ballTouchesFieldLimit(player2Score);
+            }
+        }
+
+        // Field - Right Goal Line Interaction
+        if (ballX > canvas.width-PADDLE_MARGIN-LINEFIELD_THICKNESS){
+            if (ballY > paddle2Y && ballY < paddle2Y+PADDLE_HEIGHT){
+                ballTouchesPaddle(paddle2Y);
+            } else if (ballX > canvas.width-LINEFIELD_THICKNESS){
+                player1Score = ballTouchesFieldLimit(player1Score);
+            }
+        }
+
+        // Field - Side Line
+        if (ballY < 0 || ballY > canvas.height){
+            ballSpeedY = -ballSpeedY;
+        }        
+    }
+
+    function ballTouchesFieldLimit(playerScore){
+        if (ballY > (canvas.height/2)-GOAL_SIZE && ballY < (canvas.height/2)+GOAL_SIZE){
+            crowdScreamsGoal(GOAL_SOUND_TIME);
+            playerScore++; // GOAL GOAL GOAL
+            ballReset(playerScore);
+        } else{
+            ballSpeedX = -ballSpeedX;
+        }
+
+        return playerScore;
+    }
+
+    function ballTouchesPaddle(paddle){
+        // Just Moving the ball - X axis
+        ballSpeedX = -ballSpeedX;
+
+        // Controlling the ball depending the paddle hit angle - Y axis
+        var deltaY = ballY - (paddle+PADDLE_HEIGHT);
+        ballSpeedY = deltaY * BALL_HIT_ANGLE;
+    }
+
+    function ballReset(playerScore){
+        if (playerScore >= WINNING_SCORE){
+            showingWinScreen = true;
+        }
+
+        ballSpeedX = -ballSpeedX;
+        ballX = canvas.width/2;
+        ballY = canvas.height/2;
+    }
+
+    function cpuMovement(){
+        var paddle2YCenter = paddle2Y + (PADDLE_HEIGHT/2);
+        if (ballX < canvas.width/2){
+            paddle2Y = (canvas.height-PADDLE_HEIGHT)/2;
+        } else{
+            if(paddle2YCenter < ballY-PADDLE_CPU_RESPONSE_TIME &&
+            paddle2YCenter < canvas.height/2+PADDLE_CPU_RANGE){
+                paddle2Y += PADDLE_CPU_AGILITY; // Moving down
+            } else if (paddle2YCenter > ballY+PADDLE_CPU_RESPONSE_TIME &&
+            paddle2YCenter > canvas.height/2-PADDLE_CPU_RANGE){
+                paddle2Y -= PADDLE_CPU_AGILITY; // Moving up
+            }
+        }
+    }    
+
+    function drawFootballGame(){
+        // blanks out the screen with green
+        drawFilledRect(0,0,canvas.width,canvas.height,FIELD_COLOR);
+
+        // it shows the players score on the board
+        document.getElementById('scorePlayer1').innerHTML = player1Score;
+        document.getElementById('scorePlayer2').innerHTML = player2Score;
+
+        if (showingWinScreen){
+            drawWinnerBoard();
+            return;
+        }
+
+        drawFieldLines();
+        drawPaddles();
+
+        // this line draws the ball
+        drawFilledCircle(ballX,ballY,BALL_RADIUS_SIZE,BALL_COLOR);
+        canvasContext.strokeStyle = BALL_SECOND_COLOR;
+        canvasContext.stroke();
+
+        // it shows the players score
+        canvasContext.fillText(player1Score,100,100);        
+        canvasContext.fillText(player2Score,canvas.width-100,100);
+    }
+
+    function drawFieldLines(){
+        drawGoalFieldLine();
+        drawGoalBox((canvas.height/2)-GOAL_SIZE,1); // Draw Goal Box
+        drawGoalBox((canvas.height/2)-GOAL_SIZE,2); // Draw Penalty Box
+        drawEndFieldLine((canvas.height/2)-GOAL_SIZE);
+        drawSideFieldLine();
+        drawHalfWayFieldLine(); // Draw the center circle too
+        drawGoalArc();
+    }
+
+    function drawPaddles(){
+        // this is left player paddle
+        drawFilledRect(
+            PADDLE_MARGIN,
+            paddle1Y,
+            PADDLE_THICKNESS,
+            PADDLE_HEIGHT,
+            PLAYER1_COLOR);
+
+        // this is right player paddle
+        drawFilledRect(
+            canvas.width-PADDLE_THICKNESS-PADDLE_MARGIN,
+            paddle2Y,
+            PADDLE_THICKNESS,
+            PADDLE_HEIGHT,
+            PLAYER2_COLOR);
+    }
+
+    function drawGoalArc(){
+        drawStrokeCircle(
+            canvas.width/8,
+            canvas.height/2,
+            CENTERCIRCLE_RADIUS_SIZE,
+            Math.PI*0.5,
+            Math.PI*1.5,
+            false,
+            LINEFIELD_COLOR); // Left Goal Arc
+        drawStrokeCircle(
+            (canvas.width - canvas.width/8),
+            canvas.height/2,
+            CENTERCIRCLE_RADIUS_SIZE,
+            Math.PI*1.5,
+            Math.PI*0.5,
+            false,
+            LINEFIELD_COLOR); // Right Goal Arc
+
+        drawFilledCircle(
+            canvas.width/11,
+            canvas.height/2,
+            INITIALCIRCLE_RADIUS_SIZE,
+            LINEFIELD_COLOR);
+
+        drawFilledCircle(
+            (canvas.width - canvas.width/11),
+            canvas.height/2,
+            INITIALCIRCLE_RADIUS_SIZE,
+            LINEFIELD_COLOR);                          
+    }
+
+    function drawSideFieldLine(){
+        // Top side -> Field - Player side line
+        drawFilledRect(
+            0,
+            0,
+            canvas.width,
+            LINEFIELD_THICKNESS,
+            LINEFIELD_COLOR);
+
+        // Bottom side -> Field - Player side line
+        drawFilledRect(
+            0,
+            canvas.height-LINEFIELD_THICKNESS,
+            canvas.width,
+            LINEFIELD_THICKNESS,
+            LINEFIELD_COLOR);
+    }
+
+    function drawHalfWayFieldLine(){
+        // HalfWay line
+        drawFilledRect(
+            (canvas.width-LINEFIELD_THICKNESS)/2,
+            LINEFIELD_THICKNESS,
+            LINEFIELD_THICKNESS,
+            canvas.height,
+            LINEFIELD_COLOR);
+
+        //Center Circle
+        drawStrokeCircle(
+            canvas.width/2,
+            canvas.height/2,
+            CENTERCIRCLE_RADIUS_SIZE,
+            0,
+            Math.PI*2, // two for the entire circle
+            true, // if just one half => true is for first half
+            LINEFIELD_COLOR);
+
+        //Initial Circle
+        drawFilledCircle(
+            canvas.width/2,
+            canvas.height/2,
+            INITIALCIRCLE_RADIUS_SIZE,
+            LINEFIELD_COLOR);
+    }
+
+    function drawEndFieldLine(goalLocation){
+        // Left side -> Field - Left player end line
+        drawFilledRect(
+            0,
+            0,
+            LINEFIELD_THICKNESS,
+            goalLocation,
+            LINEFIELD_COLOR);
+        drawFilledRect(
+            0,
+            canvas.height,
+            LINEFIELD_THICKNESS,
+            -(goalLocation),
+            LINEFIELD_COLOR);
+
+        // Right side -> Field - Right player end line
+        drawFilledRect(
+            canvas.width-LINEFIELD_THICKNESS,
+            0,
+            LINEFIELD_THICKNESS,
+            goalLocation,
+            LINEFIELD_COLOR);
+        drawFilledRect(
+            canvas.width-LINEFIELD_THICKNESS,
+            canvas.height,
+            LINEFIELD_THICKNESS,
+            -(goalLocation)
+            ,LINEFIELD_COLOR);
+    }
+
+    function drawGoalBox(goalLocation,multiple){
+        var golBoxSideLine = GOALBOX_SIZE_SIDE*multiple;
+        goalLocation *= multiple;
+
+        // Left Player
+        drawFilledRect(
+                    0,
+                    goalLocation,
+                    golBoxSideLine,
+                    LINEFIELD_THICKNESS,
+                    LINEFIELD_COLOR); // Top Line
+        drawFilledRect(
+                    0,
+                    canvas.height-goalLocation,
+                    golBoxSideLine,
+                    LINEFIELD_THICKNESS,
+                    LINEFIELD_COLOR); // Bottom Line
+        drawFilledRect(
+                    golBoxSideLine-LINEFIELD_THICKNESS,
+                    goalLocation,
+                    LINEFIELD_THICKNESS,
+                    (canvas.height-goalLocation)-goalLocation+LINEFIELD_THICKNESS,
+                    LINEFIELD_COLOR); // Front Line
+
+        // Right Player
+        drawFilledRect(
+                    canvas.width,
+                    goalLocation,
+                    -golBoxSideLine,
+                    LINEFIELD_THICKNESS,
+                    LINEFIELD_COLOR); // Top Line 
+        drawFilledRect(
+                    canvas.width,
+                    canvas.height-goalLocation,
+                    -golBoxSideLine,
+                    LINEFIELD_THICKNESS,
+                    LINEFIELD_COLOR); // Bottom Line
+        drawFilledRect(
+                    canvas.width-golBoxSideLine,
+                    goalLocation,
+                    LINEFIELD_THICKNESS,
+                    (canvas.height-goalLocation)-goalLocation+LINEFIELD_THICKNESS,
+                    LINEFIELD_COLOR); // Front Line           
+    }
+
+    function drawGoalFieldLine(){
+        for(var i=0;i<canvas.height;i+=GOALFIELD_LINE_DISTANCEBETWEEN){
+            drawFilledRect(
+                0,
+                i,
+                GOALFIELD_LINE_THICKNESS,GOALFIELD_LINE_SIZE,
+                LINEFIELD_COLOR);
+            drawFilledRect(
+                canvas.width-GOALFIELD_LINE_THICKNESS,
+                i,
+                GOALFIELD_LINE_THICKNESS,
+                GOALFIELD_LINE_SIZE,
+                LINEFIELD_COLOR);
+        }
+    }        
+
+    function drawWinnerBoard(){
+        canvasContext.fillStyle = 'white';
+        if (player1Score >= WINNING_SCORE){
+            canvasContext.fillText("Left Player Won!",350,200);
+        } else if (player2Score >= WINNING_SCORE){
+            canvasContext.fillText("Right Player Won!",350,200);
+        }
+        canvasContext.fillStyle = 'white';
+        canvasContext.fillText("click to continue",350,500);        
+    }     
+
+    function drawStrokeCircle(centerX,centerY,radius,sAngle,eAngle,firstHalfSide,drawColor){
+        canvasContext.lineWidth = LINEFIELD_THICKNESS;
+        canvasContext.strokeStyle=drawColor;
+        canvasContext.beginPath();
+        canvasContext.arc(centerX,centerY,radius,sAngle,eAngle,true);
+        canvasContext.stroke();
+    }
+
+    function drawFilledCircle(centerX,centerY,radius,drawColor){
+        canvasContext.fillStyle = drawColor;
+        canvasContext.beginPath();
+        canvasContext.arc(centerX,centerY,radius,0,Math.PI*2,true);
+        canvasContext.fill();
+    }
+
+    function drawFilledRect(leftX,topY,width,height,drawColor){
+        canvasContext.fillStyle = drawColor;
+        canvasContext.fillRect(leftX,topY,width,height);
+    }
+
+    function loadCrowdGoalScream(){
+        goalSound.src = GOAL_SOUND_URL;
+        goalSound.preload = "auto";
+        goalSound.controls = "none";
+        goalSound.style.display = "none";
+        //audio.addEventListener('canplaythrough', isAppLoaded, false);
+    }
+
+    function crowdScreamsGoal(time){
+        goalSound.play();
+        goalSound.currentTime = 2;
+        setTimeout(function(){
+            goalSound.pause();
+            goalSound.currentTime = 0;
+        }, time);
+    }    
+
+    function loadNationalFlags(){
+        var promiseNationalFlags = [];
+        promiseNationalFlags.push(getImage(BRAZIL_FLAG_URL));
+        promiseNationalFlags.push(getImage(NEWZEALAND_FLAG_URL));
+
+        Promise.all(promiseNationalFlags).then(function(successurl){
+            return successurl;
+        }).then(function(arraySrc){
+
+            arraySrc.forEach(function (value, i) {
+                document.images[i].src = value;
+            });
+            
+        }).catch(function(errorurl){
+            console.log('Error loading ' + errorurl)
+        });
+    }
+
+    function getImage(url){
+        return new Promise(function(resolve,reject){
+            var img = new Image()
+            img.onload = function(){
+                resolve(url);
+            }
+            img.onerror = function(){
+                reject(url);
+            }
+            img.src = url;
+        });
+    }
+
+    function loadScoreBoard() {
+        offset++;
+        if (offset > 16) {
+            offset = 0;
+        }
+
+        scoreCanvas1 = document.getElementById('player1Canvas');
+        scoreCanvas1Context = scoreCanvas1.getContext('2d');
+
+        scoreCanvas2 = document.getElementById('player2Canvas');
+        scoreCanvas2Context = scoreCanvas2.getContext('2d');
+
+        drawScoreBoard(scoreCanvas1Context,scoreCanvas1);
+        drawScoreBoard(scoreCanvas2Context,scoreCanvas2);
+        setTimeout(loadScoreBoard, 200);
+    }
+
+    function drawScoreBoard(canvasCtx,cv) {
+        canvasCtx.clearRect(0, 0, cv.width, cv.height);
+        canvasCtx.setLineDash([4, 2]);
+        canvasCtx.lineDashOffset = -offset;
+        canvasCtx.strokeRect(10, 10, 100, 100);
+    }   
+</script>
